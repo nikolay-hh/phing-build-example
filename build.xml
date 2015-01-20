@@ -1,0 +1,761 @@
+<?xml version="1.0" encoding="UTF-8"?>
+    <!--
+    **Phing hungryhouse.co.uk Template** is a XML build file for the
+    **[Phing build system](http://www.phing.info/trac/)** with targets and
+    configuration designed for **[hh.co.uk](http://hungryhouse.co.uk)** projects.
+
+    ### Usage
+
+    Just run $ phing <build.xml> <target>
+
+    ### Available targets
+
+    Just run $ phing -l
+
+    Notes:
+    * PHPUnit have been used to run tests and collect coverage statistical information
+
+    * A PHP_CodeBrowser is a tool wchich augments the code with information from various QA tools
+    It provides a code browser for PHP files with syntax highlighting and colored error-sections
+    found by quality assurance tools like PHPUnit or PHP_CodeSniffer.The visualisation of errors, warnings or notices, found by above mentioned kind of tools, is the real power of PHP_CodeBrowser.
+
+    ### Credits
+
+    The build file is heavily inspired by Sebastian Bergmans wonderful [template
+    for Jenkins Jobs for PHP Projects](http://jenkins-php.org/) and began as a
+    Phing port of his suggested Apache Ant build file. And then adopted by Mikalayeu Nikalai at 12.01.2015.
+
+    A couple of additional external tools are downloaded and used during the
+    build process:
+
+    * [Phing PHPLoc](https://github.com/raphaelstolt/phploc-phing): A custom task
+    for running phploc from Phing, BTW: Can be installed then no need to download !!!
+    * [jslint4java](http://jslint4java.googlecode.com/): Supports execution of
+    jslint from the command line
+    * [jslint´](https://github.com/mikewest/JSLint): A more humane version of
+    Douglas Crockfords JSLint.
+    * [csslint](http://csslint.net): A tool to help point out problems with CSS code.
+    * [Mozilla Rhino](http://www.mozilla.org/rhino/download.html): An implementation of Javascript in Java.
+    -->
+
+    <project name="hh" default="build">
+        <!-- ## Main targets -->
+
+        <!-- ### Build project
+
+        Do a complete build of the project by verifying code consistency and and
+        performing static analysis of the code.
+
+        This is the default build target.
+
+        Do not run `docs` for now. Generating documentation eats up memory and build
+        time and is largely obsolete when using GitHub. -->
+        <target name="build" depends="init,
+                                      verify,
+                                      analyze,
+                                      unit-test"/>
+
+        <!-- ### Verify code consistency -->
+        <target name="verify" depends="init,
+                                       check-php-debug,
+                                       check-js-debug"/>
+
+        <!-- ### Analyze code
+
+        Perform static analysis of the code to generate statistics, identify potential
+        problems and opportunities for refactorings and make sure that the code
+        complies with coding standards. -->
+        <target name="analyze" depends="init,
+                                        phploc,
+                                        phpmd,
+                                        phpcpd,
+                                        lint-php,
+                                        lint-js,
+                                        lint-css"/>
+
+        <!-- ### Generate documentation
+
+        Generate HTML documentation and code browser for the project. -->
+        <target name="docs" depends="init,
+                                     phpdoc,
+                                     phpcb" />
+
+        <!-- ## Individual targets
+        These targets can be executed individually or grouped unless explicitly
+        stated as a part of the task.
+
+        **As a rule targets without descriptions should not be executed directly.** -->
+
+        <!-- ### PHP linting
+
+        Check files for syntax errors. -->
+        <target name="lint-php"
+                description="Check all PHP files for syntax errors using PHPLint"
+                depends="init">
+            <phplint haltonfailure="true">
+            <fileset refid="all-project-php-files" />
+            </phplint>
+        </target>
+
+        <!-- ### Javascript linting
+
+        Checks code against [jslint](http://www.jslint.com/) to assure a coding
+        standard is followed and detect potential problems. By default
+        [jslint´](https://github.com/mikewest/JSLint) is used. -->
+        <target name="lint-js"
+                description="Check all Javascript files using JSlint"
+                depends="init, setup-jslint4java, setup-jslint">
+            <foreach target="jslint-file" param="filename" absparam="absfilename">
+            <fileset refid="all-project-js-files"/>
+            </foreach>
+        </target>
+
+        <!-- #### jslint a file
+
+        No need to run `init` or setup targets here. This target should only be called
+        from parent `lint-js` targets. -->
+        <target name="jslint-file">
+            <echo>Linting file: ${absfilename}</echo>
+
+            <!-- Execute jslint4java and return the result in checkstyle format-->
+            <exec command="java -jar ${jslint4java.file}
+            --jslint ${jslint.file} --report checkstyle ${absfilename}"
+            outputProperty="report" />
+
+            <!-- Print the result to a file.
+            Replace / with - in path to create legal filenames in the format
+            `checkstyle-jslint-dir1-dir2-file.js.xml`. -->
+            <php function="str_replace" returnProperty="filename.normalized">
+                <param value="/" />
+                <param value="-" />
+                <param value="${filename}" />
+            </php>
+            <delete file="${project.logdir}/checkstyle-jslint-${filename.normalized}.xml" />
+            <append text="${report}"  destFile="${project.logdir}/checkstyle-jslint-${filename.normalized}.xml" />
+        </target>
+
+        <!-- #### Setup jslint4java -->
+        <target name="setup-jslint4java"
+                depends="init"
+                unless="project.jslint4java.setup">
+            <property name="jslint4java.dir"
+                      value="${project.toolsdir}/jslint4java" />
+            <php function="basename" returnProperty="jslint4java.basename">
+                <param value="${jslint4java.url}" />
+                <!-- We assume that the version of jslint4java used is a distribution
+                where the filename ends in `-dist.zip` -->
+                <param value="-dist.zip" />
+            </php>
+
+            <!-- Download and unpack jslint4java -->
+            <mkdir dir="${jslint4java.dir}" />
+            <php function="basename" returnProperty="jslint4java.zipfile">
+                <param value="${jslint4java.url}" />
+            </php>
+            <httpget url="${jslint4java.url}"
+                     dir="${jslint4java.dir}"
+                     proxy="${phing.httpget.proxy}" />
+            <unzip file="${jslint4java.dir}/${jslint4java.zipfile}"
+                   todir="${jslint4java.dir}" />
+
+            <!-- Other targets use this property to determine the location of the
+            `jslint4java.jar` file -->
+            <property name="jslint4java.file"
+                      value="${jslint4java.dir}/${jslint4java.basename}/${jslint4java.basename}.jar"/>
+
+            <!-- Set property to prevent unnecessary additional invocations of this
+            target -->
+            <property name="project.jslint4java.setup" value="true" />
+        </target>
+
+        <!-- #### Setup jslint -->
+        <target name="setup-jslint"
+                depends="init"
+                unless="project.jslint.setup">
+            <phingcall target="setup-git-repo">
+                <property name="repo.dir" value="${project.toolsdir}/jslint"/>
+                <property name="repo.url" value="${jslint.repository.url}" />
+            </phingcall>
+
+            <!-- Other targets use this property to determine the location of the jslint
+            file -->
+            <property name="jslint.file"
+            value="${project.toolsdir}/jslint/${jslint.file}"
+            override="true" />
+
+            <!-- Set property to prevent unnecessary additional invocations of this
+            target -->
+            <property name="project.jslint.setup" value="true" />
+        </target>
+
+        <!-- ### CSS linting
+
+        Checks code against [CSS Lint](http://www.csslint.net/) to help point out problems with CSS code. It does basic syntax checking as well as applying a set of rules to the code that look for problematic patterns or signs of inefficiency. -->
+        <target name="lint-css"
+                description="Check all CSS files using CSS Lint"
+                depends="init,
+                         setup-rhino,
+                         setup-csslint">
+            <foreach target="csslint-file" param="filename" absparam="absfilename">
+                <fileset refid="all-project-css-files"/>
+            </foreach>
+        </target>
+
+        <!-- #### csslint a file
+
+        No need to run `init` or setup targets here. This target should only be called
+        from parent `lint-css` targets. -->
+        <target name="csslint-file">
+            <echo>Linting file: ${absfilename}</echo>
+
+            <!-- Run csslint through Rhino and return the result in
+            checkstyle format-->
+            <exec command="java -jar ${rhino.jar} ${csslint.rhino.file}
+            --format=checkstyle-xml --rules=${csslint.rules}
+            ${absfilename}"
+            outputProperty="report" />
+
+            <!-- Print the result to a file.
+            Replace / with - in path to create legal filenames in the format
+            `checkstyle-csslint-dir1-dir2-file.css.xml`. -->
+            <php function="str_replace" returnProperty="filename.normalized">
+                <param value="/" />
+                <param value="-" />
+                <param value="${filename}" />
+            </php>
+
+            <property name="csslint.report.file" value="${project.logdir}/checkstyle-csslint-${filename.normalized}.xml" />
+            <delete file="${csslint.report.file}" />
+            <append text="${report}"  destFile="${csslint.report.file}" />
+
+
+            <!-- Cleanup the break rules property.
+            Hyphens are removed to support both input and output rule format.
+            csslint-rule becomes CsslintRule.
+            Seperators (Commas and multiple whitespace characters) are reduced
+            to a pipe to be used in a regular expression. -->
+            <php expression="str_replace('-', '', '${csslint.rules.break}')"
+                 returnProperty="csslint.rules.break"/>
+            <php expression="preg_replace('/(\s+|\s*,\s*)/', '|', '${csslint.rules.break}')"
+                 returnProperty="csslint.rules.break"/>
+
+            <!-- If any rules which require the build to break are defined then
+            look for them. -->
+            <if>
+            <not>
+                <equals arg1="${csslint.rules.break}" arg2="" />
+            </not>
+            <then>
+                <!-- CSS Lint reports checkstyle errors using the format
+                net.csslint.RuleName. Load all checkstyle reports and look for
+                errors with such a source from the provided rules. -->
+                <loadfile property="csslint.break.errors"
+                file="${csslint.report.file}">
+                    <filterchain>
+                        <linecontainsregexp>
+                            <regexp pattern="(net\.csslint\.(${csslint.rules.break}))"
+                                    ignoreCase="true" />
+                        </linecontainsregexp>
+                    </filterchain>
+                </loadfile>
+
+                <!-- Break if any errors from the provided rules are detected! -->
+                <if>
+                <not>
+                    <equals arg1="${csslint.break.errors}" arg2="" />
+                </not>
+                <then>
+                    <fail message="CSS error detected in file ${absfilename}" />
+                </then>
+                </if>
+            </then>
+            </if>
+        </target>
+
+        <!-- #### Setup csslint -->
+        <target name="setup-csslint"
+                depends="init"
+                unless="project.csslint.setup">
+            <phingcall target="setup-git-repo">
+                <property name="repo.dir"
+                          value="${project.toolsdir}/csslint"/>
+                <property name="repo.url"
+                          value="${csslint.repository.url}" />
+                <property name="repo.revision"
+                          value="${csslint.repository.revision}" />
+            </phingcall>
+
+            <!-- Other targets use this property to determine the location of the
+            csslint rhino file -->
+            <property name="csslint.rhino.file"
+                      value="${project.toolsdir}/csslint/release/csslint-rhino.js" />
+
+            <!-- Set property to prevent unnecessary additional invocations of this
+            target -->
+            <property name="project.csslint.setup" value="true" />
+        </target>
+
+        <!-- ### Debug code detection
+
+        Code should not call functions which are usually used for debugging.
+        This belongs on developer environments - not VCS. This goes for mentioning
+        them in comments as well. -->
+        <target name="check-php-debug"
+                description="Check PHP code for debug statements"
+                depends="init">
+            <phingcall target="check-debug">
+                <property name="debug.language" value="PHP" override="true" />
+                <property name="debug.pattern" value="(var_dump\(|dsm\(|dpm\()" override="true" />
+                <property name="debug.fileset" value="all-project-php-files"/>
+            </phingcall>
+        </target>
+
+        <target name="check-js-debug"
+                description="Check Javascript code for debug statements"
+                depends="init">
+            <phingcall target="check-debug">
+                <property name="debug.language" value="Javascript" override="true" />
+                <property name="debug.pattern" value="(console\.log\()" override="true" />
+                <property name="debug.fileset" value="all-project-js-files"/>
+            </phingcall>
+        </target>
+
+        <!-- #### Check a fileset for debug code -->
+        <target name="check-debug"
+                depends="init">
+            <php function="strtolower" returnProperty="debug.language.lower">
+                <param value="${debug.language}" />
+            </php>
+            <property name="debug.output"
+                      value="${project.logdir}/debug_${debug.language.lower}.txt"
+                      override="true" />
+            <delete file="${debug.output}"/>
+            <append text="" destFile="${debug.output}" />
+
+            <foreach target="check-debug-file" param="filename" absparam="absfilename">
+                <fileset refid="${debug.fileset}"/>
+            </foreach>
+
+            <loadfile property="debug.lines" file="${debug.output}" />
+            <!-- Break if debug code is detected! -->
+            <if>
+            <not>
+                <equals arg1="${debug.lines}" arg2="" />
+            </not>
+            <then>
+                <fail message="${debug.language} debug code detected:${line.separator} ${debug.lines}" />
+            </then>
+            </if>
+        </target>
+
+        <!-- #### Check an individual file for debug code
+
+        No need to run `init` here. This target should only be called through parent
+        `check-debug` target. -->
+        <target name="check-debug-file">
+            <echo>Checking file for debug statements: ${absfilename}</echo>
+            <loadfile property="debug.lines" file="${absfilename}">
+                <filterchain>
+                    <linecontainsregexp>
+                        <regexp pattern="${debug.pattern}" />
+                    </linecontainsregexp>
+                </filterchain>
+            </loadfile>
+            <if>
+            <not>
+                <equals arg1="${debug.lines}" arg2="" />
+            </not>
+            <then>
+                <append text="${filename}:${line.separator} ${debug.lines}${line.separator}
+                             ${line.separator}"
+                        destFile="${debug.output}"/>
+            </then>
+            </if>
+        </target>
+
+        <!-- ### Detect code mess
+
+        Uses [PHPMD](http://phpmd.org/) to detect code mess and look for potential
+        problems. -->
+        <target name="phpmd"
+                description="Generate pmd.xml using PHPMD"
+                depends="init">
+            <!-- <phpmd rulesets="codesize,naming,design">
+            <fileset refid="all-project-php-files" />
+            <formatter type="xml" outfile="${project.logdir}/pmd.xml"/>
+            </phpmd> -->
+        </target>
+
+        <!-- ### Detect potential copy/pasting
+
+        Uses [phpcpd](https://github.com/sebastianbergmann/phpcpd) to detect duplicate
+        code. This indicates potential refactorings.-->
+        <target name="phpcpd"
+                description="Generate pmd-cpd.xml using phpcpd (Copy/Paste Detector (CPD) for PHP code)"
+                depends="init">
+            <phpcpd>
+                <fileset refid="all-project-php-files" />
+                <formatter type="pmd" outfile="${project.logdir}/pmd-cpd.xml"/>
+            </phpcpd>
+        </target>
+
+        <!-- ### Generate code statistics
+
+        Measures the size of the project using
+        [phploc](http://sebastianbergmann.github.com/phploc/) and generates
+        statistics. -->
+        <target name="phploc"
+                description="Generate phploc.csv using phploc
+                             (phploc is a tool for quickly measuring the size and
+                             analyzing the structure of a PHP project)"
+                depends="init">
+            <!-- analyze all php files -->
+            <phploc reportType="csv"
+                    reportName="phploc"
+                    reportDirectory="${project.logdir}"
+                    suffixes="php,module,inc,install,profile,test"
+                    countTests="true">
+                <fileset refid="all-project-php-files" />
+            </phploc>
+        </target>
+
+        <!-- #### Setup Phing phploc integration
+        Might be used for future to automatically install required tools
+        -->
+        <target name="setup-phing-phploc"
+                depends="init" >
+            <!-- Clone the project -->
+            <phingcall target="setup-git-repo">
+                <property name="repo.dir" value="${project.toolsdir}/phing-phploc"/>
+                <property name="repo.url" value="${phing.phploc.repository.url}" />
+            </phingcall>
+        <!-- Register the custom Phing task -->
+            <taskdef name="phploc"
+                     classname="PHPLocTask"
+                     classpath="${project.toolsdir}/phing-phploc" />
+        </target>
+
+        <!-- ### Review code using PHP_CodeSniffer
+
+        The purpose and outcome of this target is the same as the coder-review
+        targets. In general [PHP_CodeSniffer](http://pear.php.net/package/PHP_CodeSniffer/)
+        is faster to execute but there does not seem to be a complete ruleset which
+        covers all of the
+        [Drupal coding standards](http://drupal.org/coding-standards).
+
+        Consequently `coder-review-d6/7` and not `phpcs` is used for the main targets.
+        -->
+        <target name="phpcs"
+                description="Generate checkstyle.xml using PHP_CodeSniffer"
+                depends="init">
+            <!-- There is no Phing task for PHP Codesniffer in v2.4.6.
+            It's coming for v2.5. Execute while we wait. -->
+            <exec command="phpcs --report=checkstyle
+                --report-file=${project.logdir}/checkstyle-codesniffer.xml
+                --standard=PSR2
+                --extensions=php
+                --ignore=*/contrib/*,*/*.features.*,*/*.field_group.inc,*/*.layout.*,*/*.pages_default.*,*/*.panels_default.*,*/*strongarm.inc,*/*.views_default.inc
+                ${project.basedir}"
+                  logoutput="true" />
+        </target>
+
+        <!-- ### Generate documentation -->
+        <!-- #### Generate API Documentation
+
+        Uses [phpDocumentor](http://www.phpdoc.org/) to generate documentation. -->
+        <target name="phpdoc"
+                description="Generate PHP documentation using phpDocumentor"
+                unless="project.phpdocgenerate.skip">
+
+            <phpdoc title="PHP Documentation"
+                    destdir="${project.builddir}/doc"
+                    sourcecode="php"
+                    output="HTML:Smarty:PHP">
+                <fileset refid="all-project-php-files" />
+            </phpdoc>
+        </target>
+
+        <!-- #### Generate a code browser
+
+        Generate a code browser for PHP files with syntax highlighting and
+        colored error-sections using
+        [PHP_CodeBrowser](https://github.com/Mayflower/PHP_CodeBrowser). -->
+        <target name="phpcb"
+                description="Aggregate tool output with PHP_CodeBrowser"
+                depends="init">
+            <mkdir dir="${project.builddir}/code-browser"/>
+            <!-- There is no Phing target for PHP CodeBrowser so do a plain
+            execute. -->
+            <exec command="phpcb  --log ${project.logdir}
+                --source ${project.basedir}
+                --output ${project.builddir}/code-browser"
+                  logoutput="true" />
+        </target>
+
+        <!-- ## Helper targets
+
+        These targets are used throughout the project and should normally not be
+        executed directly.-->
+
+        <!-- ### Initialization
+
+        This target sets up many of the common resources used throughout the build.
+        All other targets except dependencies for this target should depend on this
+        unless specifically stated why. -->
+        <target name="init" unless="project.initialized" depends="load-properties,
+                                                                  clean,
+                                                                  setup-dirs,
+                                                                  setup-filesets">
+            <!-- Set property to prevent target from being executed multiple times -->
+            <property name="project.initialized" value="true"/>
+        </target>
+
+        <!-- ### Load properties
+
+        Loads a set of project specific properties from a `.properties` file.
+
+
+        Both property files are loaded so your custom `build.properties` file should
+        only contain properties where you want to override the default value e.g. set
+        your custom module code prefix or use a special version of one of the build
+        tools. -->
+        <target name="load-properties" unless="project.properties.loaded">
+            <php function="dirname" returnProperty="phing.dir">
+                <param value="${phing.file}"/>
+            </php>
+
+            <property name="project.basedir"     value="${phing.dir}" />
+            <property name="project.sitedir"     value="${project.basedir}" />
+            <property name="project.builddir"    value="${project.basedir}/build" />
+            <property name="project.toolsdir"    value="${project.builddir}/tools" />
+            <property name="project.coveragedir" value="${project.builddir}/coverage" />
+            <property name="project.logdir"      value="${project.builddir}/logs" />
+            <property name="project.docdir"      value="${project.builddir}/doc"/>
+
+
+            <!-- Use condition instead of unless property as we cannot unset properties in Phing -->
+            <if>
+            <or>
+                <!-- `istrue` evaluates to true is value is not set we need to check
+                `isset` as well -->
+                <not><istrue value="${project.properties.loaded}" /></not>
+                <not><isset property="project.properties.loaded" /></not>
+            </or>
+            <then>
+
+            <!-- If `build.properties` exists then assume we have a
+            project root directory -->
+            <if>
+            <available file="${project.basedir}/build.properties"/>
+            <then>
+                <resolvepath propertyName="project.basedir"
+                file="${project.basedir}/"/>
+            </then>
+            </if>
+
+            <!-- `build.properties` in build file directory -->
+            <available file="${phing.dir}/build.properties"
+            property="project.properties.file"
+            value="${phing.dir}/build.properties" />
+
+            <!-- Load the overriding properties. -->
+            <property file="${project.properties.file}" override="true" />
+
+            <!-- Set property to prevent unnecessary additional invocations of this target -->
+            <property name="project.properties.loaded" value="true" />
+            </then>
+            </if>
+        </target>
+
+        <!-- ### Setup directories
+
+        Define working directories - where the individual parts of the build are and
+        should be located. These are used in other targets.
+
+        This is part of the initialization of the build. This target should only be
+        called from `init` target. -->
+        <target name="setup-dirs"
+                depends="load-properties"
+                unless="project.folders-set">
+
+            <!-- Create required folders  -->
+            <if>
+                <available file='${project.builddir}' type='dir' />
+                <then>
+                    <echo>Directory (${project.builddir}) exists, not created</echo>
+                </then>
+                <else>
+                    <mkdir dir="${project.builddir}" />
+                </else>
+            </if>
+
+            <if>
+                <available file='${project.toolsdir}' type='dir' />
+                <then>
+                    <echo>Directory (${project.toolsdir}) exists, not created</echo>
+                </then>
+                <else>
+                    <mkdir dir="${project.toolsdir}" />
+                </else>
+            </if>
+
+            <if>
+                <available file='${project.coveragedir}' type='dir' />
+                <then>
+                    <echo>Directory (${project.coveragedir}) exists, not created</echo>
+                </then>
+                <else>
+                    <mkdir dir="${project.coveragedir}" />
+                </else>
+            </if>
+
+            <if>
+                <available file='${project.logdir}' type='dir' />
+                <then>
+                    <echo>Directory (${project.logdir}) exists, not created</echo>
+                </then>
+                <else>
+                    <mkdir dir="${project.logdir}" />
+                </else>
+            </if>
+            <if>
+                <available file='${project.docdir}' type='dir' />
+                <then>
+                    <echo>Directory (${project.docdir}) exists, not created</echo>
+                </then>
+                <else>
+                    <mkdir dir="${project.docdir}" />
+                </else>
+            </if>
+
+            <!-- to avoid folder setting every call -->
+            <property name="project.folders-set" value="true"/>
+        </target>
+
+        <!-- ### Setup file sets
+
+        Setup file sets - patterns for different aspects of the source code.
+        These are used in other targets.
+
+        This is part of the initialization of the build. This target should only be
+        called from `init` target. -->
+        <target name="setup-filesets" depends="load-properties">
+            <!-- Define pattern sets for future reference -->
+
+            <!-- PHP files -->
+            <patternset id="php">
+                <exclude name="**/build/**"/>
+                <include name="**/*.php" />
+            </patternset>
+
+            <!-- Javascript files -->
+            <patternset id="js">
+                <exclude name="**/build/**"/>
+                <include name="**/*.js" />
+                <!-- Minimized JavaScript files should not be analyzed.
+                In their optimized state they can not be expexted
+                to conform to coding standards. -->
+                <exclude name="**/*.min.js" />
+            </patternset>
+
+            <!-- CSS files -->
+            <patternset id="css">
+                <exclude name="**/build/**"/>
+                <include name="**/*.css" />
+            </patternset>
+
+            <fileset dir="${project.sitedir}" id="all-project-php-files">
+                <patternset refid="php"/>
+            </fileset>
+            <fileset dir="${project.sitedir}" id="all-project-js-files">
+                <patternset refid="js"/>
+            </fileset>
+            <fileset dir="${project.sitedir}" id="all-project-css-files">
+                <patternset refid="css"/>
+            </fileset>
+        </target>
+
+        <!-- ### Clean working environment  -->
+        <target name="clean" description="Clean up and create artifact directories"
+                unless="project.cleaned">
+            <!-- Delete any existing artifacts from a previous build.
+            Do not delete builddir. It may contain the build file! -->
+            <delete dir="${project.toolsdir}"/>
+            <delete dir="${project.coveragedir}"/>
+            <delete dir="${project.logdir}"/>
+            <delete dir="${project.builddir}"/>
+
+            <!-- Set property to prevent target from being executed multiple times -->
+            <property name="project.cleaned" value="true"/>
+        </target>
+
+        <!-- ### Clone a git repository -->
+        <target name="setup-git-repo">
+            <!-- Only clone if repository does not exist already -->
+            <if>
+            <not><available file="${repo.dir}" /></not>
+            <then>
+                <!-- Set revision to HEAD if not already defined -->
+                <property name="repo.revision" value="HEAD" override="false"/>
+
+                <echo>Cloning ${repo.url} ${repo.revision} into ${repo.dir}</echo>
+                <!-- The [`gitclone` task](http://www.phing.info/docs/guide/stable/chapters/appendixes/AppendixC-OptionalTasks.html#GitCloneTask)
+                does not seem to work. Use exec instead. -->
+                <exec command="git clone ${repo.url} ${repo.dir}" />
+                <exec command="git checkout ${repo.revision}" dir="${repo.dir}"/>
+            </then>
+            </if>
+        </target>
+
+        <!-- ### Setup Rhino
+
+        [Mozilla Rhino](http://www.mozilla.org/rhino/) is an open-source implementation of JavaScript written in Java. -->
+        <target name="setup-rhino"
+                depends="setup-dirs"
+                unless="project.rhino.setup">
+            <property name="rhino.dir"
+                      value="${project.toolsdir}/rhino" />
+            <php function="basename" returnProperty="rhino.basename">
+                <param value="${rhino.url}" />
+                <!-- We assume that the version of Rhino used is a distribution
+                where the filename ends in `.zip` -->
+                <param value=".zip" />
+            </php>
+
+            <!-- Other targets use this property to determine the location of the
+            `js.jar` file -->
+            <property name="rhino.jar"
+                      value="${rhino.dir}/${rhino.basename}/js.jar"/>
+
+            <!-- If the Rhino js.jar file is not available then download and
+            unpack Rhino -->
+            <if>
+            <not><available file="${rhino.jar}"/></not>
+            <then>
+                <mkdir dir="${rhino.dir}" />
+                <php function="basename" returnProperty="rhino.zipfile">
+                <param value="${rhino.url}" />
+            </php>
+            <httpget url="${rhino.url}"
+                     dir="${rhino.dir}"
+                     proxy="${phing.httpget.proxy}"/>
+                <unzip file="${rhino.dir}/${rhino.zipfile}"
+                       todir="${rhino.dir}" />
+            </then>
+            </if>
+
+            <!-- Set property to prevent unnecessary additional invocations of this
+            target -->
+            <property name="project.rhino.setup" value="true" />
+        </target>
+
+        <!-- PHPUnit target (see phpunit.xml for details) -->
+
+        <target name="unit-test" depends="init">
+            <exec executable="phpunit" checkreturn="true" passthru="true">
+                <arg line="-c phpunit.xml"/>
+            </exec>
+            <echo msg="phpunit finished" />
+        </target>
+
+</project>

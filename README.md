@@ -21,27 +21,7 @@ Main targets:
  phpdoc           Generate PHP documentation using phpDocumentor
  phploc           Generate phploc.csv using phploc (phploc is a tool for quickly measuring the size and analyzing the structure of a PHP project)
  phpmd            Generate pmd.xml using PHPMD
+ unit-test        Run PHPUnit
 
-Subtargets:
--------------------------------------------------------------------------------
- analyze
- build
- check-debug
- check-debug-file
- csslint-file
- docs
- init
- jslint-file
- load-properties
- setup-csslint
- setup-dirs
- setup-filesets
- setup-git-repo
- setup-jslint
- setup-jslint4java
- setup-phing-phploc
- setup-rhino
- unit-test
- verify
 ```
 
